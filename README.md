@@ -41,4 +41,6 @@ b) It can only be exposed to the programmer at the topmost level, allowing them 
 
 Not-so-random aside: how do we handle optimisitic updates? You have a local type, that gets lifted to a shared type, which then comes back to the browser in a local context. This round trip takes time. The easiest thing would be to wait it out and just use the shared type when it coems back. However if you want to make things snappier, there should be a way to update your local copy of the shared type immediately, and then once the new shared type comes in, we merge that in as seamlessly as we can.
 
+Another cool approach is the CRDT one as long as we limit how our state can evolve appropriately... Adriaan's work wil be super relevant here.
+
 3. Curious to see how I handle more and more shared, global states between components over time... As said above I'm relucant for State monads because they feel too imperitive, but we shall see where things go.
