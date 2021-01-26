@@ -5,7 +5,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-
 module Main where
 
 import Control.Lens
@@ -20,8 +19,6 @@ import           Data.Functor           (($>))
 import Control.Applicative              ((<*>), (<$>), empty)
 import Control.Monad.Fix                (MonadFix)
 import Data.Maybe                       (isNothing)
-
-
 
 mainCss :: Data.ByteString.ByteString
 mainCss = $(embedFile "main.css")
@@ -40,11 +37,9 @@ data Registrant = Registrant
 register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => m (Event t Registrant)
 register = divClass "auth-page" $ divClass "container page" $ divClass "row" $ divClass "col-md-6 offset-md-3 col-xs-12" $ do
     elClass "h1" "text-xs-center" $ text "Sign up"
-    (loginElem, _) <- elClass' "p" "text-xs-center" $
+    loginNav <- elClass "p" "text-xs-center" $ -- TODO get loginNav back up to toplevel
       aClass baseURL "" $ text "Already have an account?"
-    
-    let loginClick = domEvent Click loginElem
-    
+        
     elClass "ul" "error-messages" $
       blank -- TODO
 
