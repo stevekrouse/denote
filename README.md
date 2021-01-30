@@ -27,7 +27,7 @@ I have a [Turbine / Hareactive program in a similar state](https://codesandbox.i
 * https://github.com/reflex-frp/reflex-dom/blob/develop/Quickref.md
 * https://github.com/reflex-frp/reflex/blob/develop/Quickref.md
 * https://reflex-frp.org/tutorial
-
+* `nix-shell`, then `hoogle server --local`
 ## Open questions
 
 1. How do I handle / simulate the time it takes for information to propogate between browsers? (loading time)
