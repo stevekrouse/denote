@@ -38,19 +38,20 @@ data Registrant = Registrant
   , password :: Text
   } deriving (Show)
 
-validate :: Registrant -> [ String ]
-validate Registrant { username = username, email = email, password = password } =
+validate :: Maybe Registrant -> Bool -> Bool -> [ String ]
+validate Nothing _ _ = [ ]
+validate (Just Registrant { username = username, email = email, password = password }) usernameAlreadyTaken_ emailAlreadyTaken_ =
     catMaybes [
-      -- if usernameAlreadyTaken username then "username has already been taken" else Nothing,
-      -- if emailAlreadyTaken email then "email has already been taken" else Nothing,
+      if usernameAlreadyTaken_ then Just "username has already been taken" else Nothing,
+      if emailAlreadyTaken_ then Just "email has already been taken" else Nothing,
       if length (unpack password) < 8 then Just "password is too short (minimum is 8 characters)" else Nothing,
       if null $ unpack username then Just "username can't be blank" else Nothing,
       if null $ unpack email then Just "email can't be blank" else Nothing,
       if null $ unpack password then Just "password can't be blank" else Nothing
     ]
 
-register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Dynamic t Bool) -> m (Event t Registrant)
-register usernameAlreadyTaken = divClass "auth-page" $ divClass "container page" $ divClass "row" $ divClass "col-md-6 offset-md-3 col-xs-12" $ mdo
+register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
+register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClass "container page" $ divClass "row" $ divClass "col-md-6 offset-md-3 col-xs-12" $ mdo
     elClass "h1" "text-xs-center" $ text "Sign up"
     loginNav <- elClass "p" "text-xs-center" $ -- TODO get loginNav back up to toplevel
       aClass baseURL "" $ text "Already have an account?"
@@ -78,7 +79,7 @@ register usernameAlreadyTaken = divClass "auth-page" $ divClass "container page"
             , ("placeholder","Password")
             , ("type","password")
             ]
-      dynText $ pack . show <$> (usernameAlreadyTaken =<< (usernameI ^. to _inputElement_value))
+      
       (submitElem, _) <- elAttr' "button" ("class" =: "btn btn-lg btn-primary pull-xs-right" <> "type" =: "button") $ text "Sign Up"
       let submitE = domEvent Click submitElem
       let user = Registrant
@@ -88,7 +89,19 @@ register usernameAlreadyTaken = divClass "auth-page" $ divClass "container page"
 
       tellEvent $ First baseURL <$ submitE
 
-      pure $ user `tagPromptlyDyn` submitE
+      let newUserSubmitted = user `tagPromptlyDyn` submitE
+      submittedUser <- holdDyn Nothing $ Just <$> newUserSubmitted
+      let errors = validate 
+            <$> submittedUser 
+            <*> (usernameAlreadyTaken =<< (usernameI ^. to _inputElement_value))
+            <*> (emailAlreadyTaken =<< (emailI ^. to _inputElement_value))
+      let validUserSubmitted = (attachPromptlyDyn errors newUserSubmitted) 
+            & ffilter (\(errors, _) -> null errors)
+            & fmap snd
+
+      dynText $ pack . show . unwords <$> errors
+
+      pure validUserSubmitted
 
 homePage :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => Maybe Registrant -> m ()
 homePage loggedInUser = elClass "div" "home-page" $ mdo
@@ -137,14 +150,14 @@ navbar url loggedInUser = do
     navItem route contents = elClass "li" "nav-item" $ do
       aClass route ("nav-link" ++ if url == route then " active" else "") contents
 
-router :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => String -> Maybe Registrant -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
-router url loggedInUser usernameAlreadyTaken
+router :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => String -> Maybe Registrant -> (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
+router url loggedInUser usernameAlreadyTaken emailAlreadyTaken
   | url == baseURL                               = homePage loggedInUser $> never
-  | url == registerURL && isNothing loggedInUser = register usernameAlreadyTaken
+  | url == registerURL && isNothing loggedInUser = register usernameAlreadyTaken emailAlreadyTaken
   | otherwise                                    = homePage loggedInUser $> never
 
-browser :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => (Text -> Dynamic t Bool) -> m (Event t Registrant)
-browser usernameAlreadyTaken = mdo
+browser :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
+browser usernameAlreadyTaken emailAlreadyTaken = mdo
   (newUser, urlBarUpdates) <- runEventWriterT $ mdo
     divClass "browser" $ mdo
       urlElem <- inputElement $ def
@@ -153,7 +166,7 @@ browser usernameAlreadyTaken = mdo
         & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList [("class","url-bar")]
       let urlB = unpack <$> _inputElement_value urlElem
       dyn $ navbar <$> urlB <*> loggedInUser
-      newUserNested <- dyn $ router <$> urlB <*> loggedInUser <*> constDyn usernameAlreadyTaken
+      newUserNested <- dyn $ router <$> urlB <*> loggedInUser <*> constDyn usernameAlreadyTaken <*> constDyn emailAlreadyTaken
       newUser <- switchHold never newUserNested
       loggedInUser <- holdDyn Nothing $ fmap Just newUser -- TODO logout
       pure newUser
@@ -170,16 +183,15 @@ loginURL = "denote-conduit.com/login"
 
 app :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => m ()
 app = divClass "universe" $ mdo
-  newUser <- browser usernameAlreadyTaken
-  newUser1 <- browser usernameAlreadyTaken
+  newUser <- browser usernameAlreadyTaken emailAlreadyTaken
+  newUser1 <- browser usernameAlreadyTaken emailAlreadyTaken
   users <- foldDyn (:) [] $ leftmost [newUser, newUser1] -- TODO UUID and switch to map? & leftmost is not quite right
 
   let usernameAlreadyTaken username_ = isJust . find (== username_) . map username <$> users
+  let emailAlreadyTaken email_ = isJust . find (== email_) . map email <$> users
 
   dynText $ fmap (pack . show) users
 
   pure ()
-
-   -- emailAlreadyTaken email_ = find (== email) $ map email users
 
 main = mainWidgetWithCss mainCss app
