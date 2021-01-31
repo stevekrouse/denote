@@ -20,7 +20,7 @@ import           Data.Functor           (($>))
 import Control.Applicative              ((<*>), (<$>), empty)
 import Control.Monad                    (join)
 import Control.Monad.Fix                (MonadFix)
-import Data.Maybe                       (isNothing, catMaybes, isJust)
+import Data.Maybe                       (isNothing, catMaybes, isJust ,fromMaybe)
 import Data.Semigroup                   (First (..))
 import Data.Foldable                    (find)
 
@@ -38,6 +38,8 @@ data Registrant = Registrant
   , password :: Text
   } deriving (Show)
 
+emptyRegistrant = Registrant "" "" ""
+
 validate :: Maybe Registrant -> Bool -> Bool -> [ String ]
 validate Nothing _ _ = [ ]
 validate (Just Registrant { username = username, email = email, password = password }) usernameAlreadyTaken_ emailAlreadyTaken_ =
@@ -50,6 +52,9 @@ validate (Just Registrant { username = username, email = email, password = passw
       if null $ unpack password then Just "password can't be blank" else Nothing
     ]
 
+-- >>> validate (Just emptyRegistrant) False False
+-- ["password is too short (minimum is 8 characters)","username can't be blank","email can't be blank","password can't be blank"]
+
 register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
 register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClass "container page" $ divClass "row" $ divClass "col-md-6 offset-md-3 col-xs-12" $ mdo
     elClass "h1" "text-xs-center" $ text "Sign up"
@@ -57,9 +62,9 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
       aClass baseURL "" $ text "Already have an account?"
 
     elClass "ul" "error-messages" $
-      blank
+      simpleList errors (el "li" . dynText . fmap pack) 
 
-    el "form" $ do
+    newUserSubmitted <- el "form" $ do
       usernameI <- elClass "fieldset" "form-group" $
         inputElement $ def
           & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
@@ -87,21 +92,19 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
             <*> emailI ^. to _inputElement_value
             <*> passI ^. to _inputElement_value
 
-      tellEvent $ First baseURL <$ submitE
+      pure $ user `tagPromptlyDyn` submitE
+    
+    submittedUser <- holdDyn Nothing $ Just <$> newUserSubmitted
+    let errors = validate 
+          <$> submittedUser 
+          <*> (usernameAlreadyTaken . username . fromMaybe emptyRegistrant =<< submittedUser)
+          <*> (emailAlreadyTaken . email . fromMaybe emptyRegistrant =<< submittedUser)
+    let isValidUserSumitted = (&&) <$> (isJust <$> submittedUser) <*> (null <$> errors)
+    let validUserSubmitted = gate (current isValidUserSumitted) newUserSubmitted
+    
+    pure validUserSubmitted
 
-      let newUserSubmitted = user `tagPromptlyDyn` submitE
-      submittedUser <- holdDyn Nothing $ Just <$> newUserSubmitted
-      let errors = validate 
-            <$> submittedUser 
-            <*> (usernameAlreadyTaken =<< (usernameI ^. to _inputElement_value))
-            <*> (emailAlreadyTaken =<< (emailI ^. to _inputElement_value))
-      let validUserSubmitted = (attachPromptlyDyn errors newUserSubmitted) 
-            & ffilter (\(errors, _) -> null errors)
-            & fmap snd
-
-      dynText $ pack . show . unwords <$> errors
-
-      pure validUserSubmitted
+    
 
 homePage :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => Maybe Registrant -> m ()
 homePage loggedInUser = elClass "div" "home-page" $ mdo
