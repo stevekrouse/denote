@@ -40,9 +40,8 @@ data Registrant = Registrant
 
 emptyRegistrant = Registrant "" "" ""
 
-validate :: Maybe Registrant -> Bool -> Bool -> [ String ]
-validate Nothing _ _ = [ ]
-validate (Just Registrant { username = username, email = email, password = password }) usernameAlreadyTaken_ emailAlreadyTaken_ =
+validate :: Registrant -> Bool -> Bool -> [ String ]
+validate Registrant { username = username, email = email, password = password } usernameAlreadyTaken_ emailAlreadyTaken_ =
     catMaybes [
       if usernameAlreadyTaken_ then Just "username has already been taken" else Nothing,
       if emailAlreadyTaken_ then Just "email has already been taken" else Nothing,
@@ -92,17 +91,18 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
             <*> emailI ^. to _inputElement_value
             <*> passI ^. to _inputElement_value
 
-      pure $ user `tagPromptlyDyn` submitE
+      pure $ current user <@ submitE
     
-    submittedUser <- holdDyn Nothing $ Just <$> newUserSubmitted
-    let errors = validate 
-          <$> submittedUser 
-          <*> (usernameAlreadyTaken . username . fromMaybe emptyRegistrant =<< submittedUser)
-          <*> (emailAlreadyTaken . email . fromMaybe emptyRegistrant =<< submittedUser)
-    let isValidUserSumitted = (&&) <$> (isJust <$> submittedUser) <*> (null <$> errors)
-    let validUserSubmitted = gate (current isValidUserSumitted) newUserSubmitted
-    
-    pure validUserSubmitted
+    let (someErrors,goodUser) =
+          fanEither
+          . pushAlways (\registrant -> do
+                        nameTaken <- sample . current . usernameAlreadyTaken . username $ registrant
+                        emailTaken <- sample . current . emailAlreadyTaken . email $ registrant
+                        let errors = validate registrant nameTaken emailTaken
+                        pure (if null errors then Right registrant else Left errors))
+          $ newUserSubmitted
+    errors <- holdDyn [] someErrors
+    pure goodUser
 
     
 
