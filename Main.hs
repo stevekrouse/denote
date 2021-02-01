@@ -38,8 +38,6 @@ data Registrant = Registrant
   , password :: Text
   } deriving (Show)
 
-emptyRegistrant = Registrant "" "" ""
-
 validate :: Registrant -> Bool -> Bool -> [ String ]
 validate Registrant { username = username, email = email, password = password } usernameAlreadyTaken_ emailAlreadyTaken_ =
     catMaybes [
@@ -96,12 +94,16 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
     let (someErrors,goodUser) =
           fanEither
           . pushAlways (\registrant -> do
-                        nameTaken <- sample . current . usernameAlreadyTaken . username $ registrant
-                        emailTaken <- sample . current . emailAlreadyTaken . email $ registrant
-                        let errors = validate registrant nameTaken emailTaken
-                        pure (if null errors then Right registrant else Left errors))
+                        v <- sample . current
+                             $ validate registrant
+                             <$> (usernameAlreadyTaken . username $ registrant)
+                             <*> (emailAlreadyTaken . email $ registrant)
+                        pure (if null v then Right registrant else Left v))
           $ newUserSubmitted
     errors <- holdDyn [] someErrors
+
+    tellEvent $ First baseURL <$ goodUser
+
     pure goodUser
 
     
@@ -153,10 +155,61 @@ navbar url loggedInUser = do
     navItem route contents = elClass "li" "nav-item" $ do
       aClass route ("nav-link" ++ if url == route then " active" else "") contents
 
+settings :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => Maybe Registrant -> m (Event t ())
+settings Nothing = pure never
+settings (Just Registrant { username = username, email = email, password = password }) = do
+  elClass "div" "settings-page" $ do
+    elClass "div" "container page" $
+      elClass "div" "row" $
+        elClass "div" "col-md-6 offset-md-3 col-xs-12" $ do
+          elClass "h1" "text-xs-center" $ text "Your Settings"
+          el "form" $ do
+            el "fieldset" $ do
+              urlI <- elClass "fieldset" "form-group" $
+                inputElement $ def
+                  & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                    [("class","form-control")
+                    ,("placeholder","URL of profile picture")
+                    ]
+              usernameI <- elClass "fieldset" "form-group" $
+                inputElement $ def
+                  & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                    [ ("class","form-control")
+                    , ("placeholder","Your name")
+                    , ("value", username)
+                    ]
+                  & inputElementConfig_setValue .~ username
+              bioI <- elClass "fieldset" "form-group" $
+                textAreaElement $ def
+                  & textAreaElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                    [("class","form-control")
+                    ,("placeholder","Short bio about you")
+                    ,("rows","8")
+                    ]
+              emailI <- elClass "fieldset" "form-group" $
+                inputElement $ def
+                  & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                    [ ("class", "form-control")
+                    , ("placeholder", "Email")
+                    , ("type", "input")
+                    , ("value", email)
+                    ]
+              passwordI <- elClass "fieldset" "form-group" $
+                inputElement $ def
+                  & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                    [("class","form-control")
+                    ,("placeholder","Password")
+                    ,("type","password")
+                    ]
+              -- TODO
+              -- updateE <- buttonClass "btn btn-lg btn-primary pull-xs-right" $ text "Update Settings"
+              pure never
+
 router :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => String -> Maybe Registrant -> (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
 router url loggedInUser usernameAlreadyTaken emailAlreadyTaken
   | url == baseURL                               = homePage loggedInUser $> never
   | url == registerURL && isNothing loggedInUser = register usernameAlreadyTaken emailAlreadyTaken
+  | url == settingsURL && isJust loggedInUser    = settings loggedInUser $> never
   | otherwise                                    = homePage loggedInUser $> never
 
 browser :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
@@ -182,7 +235,10 @@ registerURL :: String
 registerURL = baseURL ++ "register"
 
 loginURL :: String
-loginURL = "denote-conduit.com/login"
+loginURL = baseURL ++ "login"
+
+settingsURL :: String
+settingsURL = baseURL ++ "settings"
 
 app :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => m ()
 app = divClass "universe" $ mdo
