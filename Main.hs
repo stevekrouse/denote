@@ -52,14 +52,14 @@ validate Registrant { username = username, email = email, password = password } 
 -- >>> validate (Just emptyRegistrant) False False
 -- ["password is too short (minimum is 8 characters)","username can't be blank","email can't be blank","password can't be blank"]
 
-register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
+register :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t (Maybe  Registrant))
 register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClass "container page" $ divClass "row" $ divClass "col-md-6 offset-md-3 col-xs-12" $ mdo
     elClass "h1" "text-xs-center" $ text "Sign up"
     loginNav <- elClass "p" "text-xs-center" $ -- TODO get loginNav back up to toplevel
       aClass baseURL "" $ text "Already have an account?"
 
     elClass "ul" "error-messages" $
-      simpleList errors (el "li" . dynText . fmap pack) 
+      simpleList errors (el "li" . dynText . fmap pack)
 
     newUserSubmitted <- el "form" $ do
       usernameI <- elClass "fieldset" "form-group" $
@@ -81,7 +81,7 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
             , ("placeholder","Password")
             , ("type","password")
             ]
-      
+
       (submitElem, _) <- elAttr' "button" ("class" =: "btn btn-lg btn-primary pull-xs-right" <> "type" =: "button") $ text "Sign Up"
       let submitE = domEvent Click submitElem
       let user = Registrant
@@ -90,8 +90,8 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
             <*> passI ^. to _inputElement_value
 
       pure $ current user <@ submitE
-    
-    let (someErrors,goodUser) =
+
+    let (someErrors, goodUser) =
           fanEither
           . pushAlways (\registrant -> do
                         v <- sample . current
@@ -104,9 +104,9 @@ register usernameAlreadyTaken emailAlreadyTaken = divClass "auth-page" $ divClas
 
     tellEvent $ First baseURL <$ goodUser
 
-    pure goodUser
+    pure $ Just <$> goodUser
 
-    
+
 
 homePage :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => Maybe Registrant -> m ()
 homePage loggedInUser = elClass "div" "home-page" $ mdo
@@ -155,7 +155,7 @@ navbar url loggedInUser = do
     navItem route contents = elClass "li" "nav-item" $ do
       aClass route ("nav-link" ++ if url == route then " active" else "") contents
 
-settings :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => Maybe Registrant -> m (Event t ())
+settings :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => Maybe Registrant -> m (Event t (Maybe Registrant))
 settings Nothing = pure never
 settings (Just Registrant { username = username, email = email, password = password }) = do
   elClass "div" "settings-page" $ do
@@ -178,7 +178,6 @@ settings (Just Registrant { username = username, email = email, password = passw
                     , ("placeholder","Your name")
                     , ("value", username)
                     ]
-                  & inputElementConfig_setValue .~ username
               bioI <- elClass "fieldset" "form-group" $
                 textAreaElement $ def
                   & textAreaElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
@@ -201,19 +200,70 @@ settings (Just Registrant { username = username, email = email, password = passw
                     ,("placeholder","Password")
                     ,("type","password")
                     ]
+              updateE <- buttonClass "btn btn-lg btn-primary pull-xs-right" $ text "Update Settings"
               -- TODO
-              -- updateE <- buttonClass "btn btn-lg btn-primary pull-xs-right" $ text "Update Settings"
-              pure never
 
-router :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => String -> Maybe Registrant -> (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
-router url loggedInUser usernameAlreadyTaken emailAlreadyTaken
+              el "hr" blank
+
+              logoutClick <- buttonClass "btn btn-outline-danger" $ text "Logout"
+              tellEvent $ First baseURL <$ logoutClick
+              pure $ Nothing <$ logoutClick
+
+login :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => (Text -> Text -> Dynamic t (Maybe Registrant)) -> m (Event t (Maybe Registrant))
+login loginUser = elClass "div" "auth-page" $ do
+  elClass "div" "container-page" $ do
+    elClass "div" "row" $ do
+      elClass "div" "col-md-6 offset-md-3 col-xs-12" $ mdo
+        elClass "h1" "text-xs-center" $ text "Sign in"
+
+        -- Put a link here that goes to signup
+        elClass "p" "text-xs-center" $ blank
+          -- routeLink (FrontendRoute_Register :/ ()) $ text "Need an account?"
+
+        -- errorDyn <- holdDyn Nothing $ leftmost [Nothing <$ submitE, Just <$> errorE]
+
+        elClass "ul" "error-messages" $ blank
+          -- void $ dyn $ ffor errorDyn $ traverse_ $ \_ ->
+          --   el "li" (text "Login Failed")
+
+        el "form" $ mdo
+          emailI <- elClass "fieldset" "form-group" $
+            inputElement $ def
+              & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                [ ("class","form-control form-control-lg")
+                , ("placeholder","Email")
+                ]
+          passI <- elClass "fieldset" "form-group" $
+            inputElement $ def
+              & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList
+                [ ("class","form-control form-control-lg")
+                , ("placeholder","Password")
+                , ("type","password")
+                ]
+          -- And a submit button. Not really a submit element. Should fix this
+          submitE <- buttonClass "btn btn-lg btn-primary pull-xs-right" $ text "Sign in"
+
+          maybeUser <- sample . current $ loginUser <$> emailI ^. to _inputElement_value <*> passI ^. to _inputElement_value
+
+          -- tellEvent $ pure . (_LogIn #) . unNamespace <$> successE
+
+          pure $ updated maybeUser
+
+buttonClass :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => Text -> m a -> m (Event t ())
+buttonClass klass m = do
+  (el, _) <- elAttr' "button" ("class" =: klass <> "type" =: "button") m
+  pure $ () <$ domEvent Click el
+
+router :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => String -> Maybe Registrant -> (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> (Text -> Text -> Dynamic t (Maybe Registrant)) -> m (Event t (Maybe Registrant))
+router url loggedInUser usernameAlreadyTaken emailAlreadyTaken loginUser
   | url == baseURL                               = homePage loggedInUser $> never
   | url == registerURL && isNothing loggedInUser = register usernameAlreadyTaken emailAlreadyTaken
-  | url == settingsURL && isJust loggedInUser    = settings loggedInUser $> never
+  | url == loginURL && isNothing loggedInUser    = login loginUser
+  | url == settingsURL && isJust loggedInUser    = settings loggedInUser
   | otherwise                                    = homePage loggedInUser $> never
 
-browser :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> m (Event t Registrant)
-browser usernameAlreadyTaken emailAlreadyTaken = mdo
+browser :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => (Text -> Dynamic t Bool) -> (Text -> Dynamic t Bool) -> (Text -> Text -> Dynamic t (Maybe Registrant)) -> m (Event t (Maybe Registrant))
+browser usernameAlreadyTaken emailAlreadyTaken loginUser = mdo
   (newUser, urlBarUpdates) <- runEventWriterT $ mdo
     divClass "browser" $ mdo
       urlElem <- inputElement $ def
@@ -222,9 +272,9 @@ browser usernameAlreadyTaken emailAlreadyTaken = mdo
         & inputElementConfig_elementConfig.elementConfig_initialAttributes .~ Map.fromList [("class","url-bar")]
       let urlB = unpack <$> _inputElement_value urlElem
       dyn $ navbar <$> urlB <*> loggedInUser
-      newUserNested <- dyn $ router <$> urlB <*> loggedInUser <*> constDyn usernameAlreadyTaken <*> constDyn emailAlreadyTaken
+      newUserNested <- dyn $ router <$> urlB <*> loggedInUser <*> constDyn usernameAlreadyTaken <*> constDyn emailAlreadyTaken <*> constDyn loginUser
       newUser <- switchHold never newUserNested
-      loggedInUser <- holdDyn Nothing $ fmap Just newUser -- TODO logout
+      loggedInUser <- holdDyn Nothing newUser
       pure newUser
   pure newUser
 
@@ -242,12 +292,14 @@ settingsURL = baseURL ++ "settings"
 
 app :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => m ()
 app = divClass "universe" $ mdo
-  newUser <- browser usernameAlreadyTaken emailAlreadyTaken
-  newUser1 <- browser usernameAlreadyTaken emailAlreadyTaken
-  users <- foldDyn (:) [] $ leftmost [newUser, newUser1] -- TODO UUID and switch to map? & leftmost is not quite right
+  newUser <- browser usernameAlreadyTaken emailAlreadyTaken loginUser
+  newUser1 <- browser usernameAlreadyTaken emailAlreadyTaken loginUser
+  usersM <- foldDyn (:) [] $ leftmost [newUser, newUser1] -- TODO UUID and switch to map? & leftmost is not quite right
+  let users = catMaybes <$> usersM
 
   let usernameAlreadyTaken username_ = isJust . find (== username_) . map username <$> users
   let emailAlreadyTaken email_ = isJust . find (== email_) . map email <$> users
+  let loginUser email_ password_ = find (\r -> email r == email_ && password r == password_) <$> users
 
   dynText $ fmap (pack . show) users
 
