@@ -216,7 +216,6 @@ login loginUser = elClass "div" "auth-page" $ do
       elClass "div" "col-md-6 offset-md-3 col-xs-12" $ mdo
         elClass "h1" "text-xs-center" $ text "Sign in"
 
-        -- Put a link here that goes to signup
         elClass "p" "text-xs-center" $ blank
           -- routeLink (FrontendRoute_Register :/ ()) $ text "Need an account?"
 
@@ -240,14 +239,14 @@ login loginUser = elClass "div" "auth-page" $ do
                 , ("placeholder","Password")
                 , ("type","password")
                 ]
-          -- And a submit button. Not really a submit element. Should fix this
           submitE <- buttonClass "btn btn-lg btn-primary pull-xs-right" $ text "Sign in"
 
-          maybeUser <- sample . current $ loginUser <$> emailI ^. to _inputElement_value <*> passI ^. to _inputElement_value
+          let emailAndPassword = (,) <$> emailI ^. to _inputElement_value <*> passI ^. to _inputElement_value
+          let emailAndPasswordE = current emailAndPassword <@ submitE
+          let loggedInUser = ffilter isJust $ pushAlways (\(email, password) -> sample . current $ loginUser email password) emailAndPasswordE
+          tellEvent $ First baseURL <$ loggedInUser
 
-          -- tellEvent $ pure . (_LogIn #) . unNamespace <$> successE
-
-          pure $ updated maybeUser
+          pure loggedInUser
 
 buttonClass :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m, EventWriter t (First String) m) => Text -> m a -> m (Event t ())
 buttonClass klass m = do
@@ -290,19 +289,21 @@ loginURL = baseURL ++ "login"
 settingsURL :: String
 settingsURL = baseURL ++ "settings"
 
+
 app :: (DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m) => m ()
 app = divClass "universe" $ mdo
   newUser <- browser usernameAlreadyTaken emailAlreadyTaken loginUser
   newUser1 <- browser usernameAlreadyTaken emailAlreadyTaken loginUser
-  usersM <- foldDyn (:) [] $ leftmost [newUser, newUser1] -- TODO UUID and switch to map? & leftmost is not quite right
-  let users = catMaybes <$> usersM
+  users <- foldDyn addUser [Registrant { email = "a", password = "b", username="a"}] $ fmapMaybe id (leftmost [newUser, newUser1]) -- TODO UUID and switch to map? & leftmost is not quite right
 
   let usernameAlreadyTaken username_ = isJust . find (== username_) . map username <$> users
-  let emailAlreadyTaken email_ = isJust . find (== email_) . map email <$> users
-  let loginUser email_ password_ = find (\r -> email r == email_ && password r == password_) <$> users
+      emailAlreadyTaken email_ = isJust . find (== email_) . map email <$> users
+      loginUser email_ password_ = find (\r -> email r == email_ && password r == password_) <$> users
+      addUser user users = if any (\r -> email user == email r || username user == username r) users then users else user : users
 
   dynText $ fmap (pack . show) users
 
   pure ()
+
 
 main = mainWidgetWithCss mainCss app
