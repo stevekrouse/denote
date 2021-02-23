@@ -19,6 +19,7 @@ I have a [Turbine / Hareactive program in a similar state](https://codesandbox.i
 
 ## Running things
 
+* `. /home/ubuntu/.nix-profile/etc/profile.d/nix.sh` 
 * `reflex-platform/try-reflex`
 * `cabal run denote`
 
